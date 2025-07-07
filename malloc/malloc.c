@@ -38,24 +38,60 @@ typedef struct my_heap_t {
 //
 // Static variables (DO NOT ADD ANOTHER STATIC VARIABLES!)
 //
-my_heap_t my_heap;
+// my_heap_t my_heap;
+my_heap_t my_heap[4];
+
+// サイズに応じてindexを返す関数
+int get_index(size_t size) {
+
+  // sizeを1000で割った数に対応させる
+  int index = size/1000;
+
+  // それ以上であれば3にする
+  if (index > 3){
+    index = 3;
+  }
+  return index;
+}
 
 //
 // Helper functions (feel free to add/remove/edit!)
 //
 
+// void my_add_to_free_list(my_metadata_t *metadata) {
+//   assert(!metadata->next);
+//   metadata->next = my_heap.free_head;
+//   my_heap.free_head = metadata;
+// }
+
+// 4つのheapに対応させる
 void my_add_to_free_list(my_metadata_t *metadata) {
   assert(!metadata->next);
-  metadata->next = my_heap.free_head;
-  my_heap.free_head = metadata;
+  int index = get_index(metadata -> size);
+  metadata->next = my_heap[index].free_head;
+  my_heap[index].free_head = metadata;
 }
 
+// void my_remove_from_free_list(my_metadata_t *metadata, my_metadata_t *prev) {
+//   if (prev) {
+//     prev->next = metadata->next;
+//   } else {
+//     my_heap.free_head = metadata->next;
+//   }
+//   metadata->next = NULL;
+// }
+
+// 4つのheapに対応させる
 void my_remove_from_free_list(my_metadata_t *metadata, my_metadata_t *prev) {
+  
+  int index = get_index(metadata -> size);
+
   if (prev) {
     prev->next = metadata->next;
   } else {
-    my_heap.free_head = metadata->next;
+    my_heap[index].free_head = metadata->next;
   }
+
   metadata->next = NULL;
 }
 
@@ -64,29 +100,155 @@ void my_remove_from_free_list(my_metadata_t *metadata, my_metadata_t *prev) {
 //
 
 // This is called at the beginning of each challenge.
+// void my_initialize() {
+//   my_heap.free_head = &my_heap.dummy;
+//   my_heap.dummy.size = 0;
+//   my_heap.dummy.next = NULL;
+// }
+
+// 4つのheap全て初期化する必要がある
 void my_initialize() {
-  my_heap.free_head = &my_heap.dummy;
-  my_heap.dummy.size = 0;
-  my_heap.dummy.next = NULL;
+  for (int i = 0; i < 4; ++i) {
+    my_heap[i].free_head = &my_heap[i].dummy;
+    my_heap[i].dummy.size = 0;
+    my_heap[i].dummy.next = NULL;
+  }
 }
+
 
 // my_malloc() is called every time an object is allocated.
 // |size| is guaranteed to be a multiple of 8 bytes and meets 8 <= |size| <=
 // 4000. You are not allowed to use any library functions other than
 // mmap_from_system() / munmap_to_system().
+
+// // bestfitに変更
+// void *my_malloc(size_t size) {
+//   my_metadata_t *metadata = my_heap.free_head;
+//   my_metadata_t *prev = NULL;
+//   // First-fit: Find the first free slot the object fits.
+//   // TODO: Update this logic to Best-fit!
+//   // while (metadata && metadata->size < size) {
+//   //   prev = metadata;
+//   //   metadata = metadata->next;
+//   // }
+
+//   //bestfit格納用の変数を用意
+//   my_metadata_t *bestfit = NULL;
+//   my_metadata_t *bestfit_prev = NULL;
+
+//   while(metadata){
+//     // もし欲しいサイズよりも大きいサイズのものを見つけたら
+//     if (metadata->size >= size){
+//       // bestfitが存在しなければそれを格納、またはbestfitの現在格納されているサイズよりも小さいものを見つけたら更新
+//       if(bestfit == NULL || (bestfit -> size) > (metadata -> size) ){
+//         bestfit = metadata;
+//         bestfit_prev = prev;
+//       }
+//     }
+//   }
+
+  
+
+  
+//   // now, metadata points to the first free slot
+//   // and prev is the previous entry.
+
+//   if (!metadata) {
+//     // There was no free slot available. We need to request a new memory region
+//     // from the system by calling mmap_from_system().
+//     //
+//     //     | metadata | free slot |
+//     //     ^
+//     //     metadata
+//     //     <---------------------->
+//     //            buffer_size
+//     size_t buffer_size = 4096;
+//     my_metadata_t *metadata = (my_metadata_t *)mmap_from_system(buffer_size);
+//     metadata->size = buffer_size - sizeof(my_metadata_t);
+//     metadata->next = NULL;
+//     // Add the memory region to the free list.
+//     my_add_to_free_list(metadata);
+//     // Now, try my_malloc() again. This should succeed.
+//     return my_malloc(size);
+//   }
+
+//   // 最終的にmetadataをbestfitで見つけたものに変更
+//   metadata = bestfit;
+//   prev = bestfit_prev;
+
+//   // |ptr| is the beginning of the allocated object.
+//   //
+//   // ... | metadata | object | ...
+//   //     ^          ^
+//   //     metadata   ptr
+//   void *ptr = metadata + 1;
+//   size_t remaining_size = metadata->size - size;
+//   // Remove the free slot from the free list.
+//   my_remove_from_free_list(metadata, prev);
+
+//   if (remaining_size > sizeof(my_metadata_t)) {
+//     // Shrink the metadata for the allocated object
+//     // to separate the rest of the region corresponding to remaining_size.
+//     // If the remaining_size is not large enough to make a new metadata,
+//     // this code path will not be taken and the region will be managed
+//     // as a part of the allocated object.
+//     metadata->size = size;
+//     // Create a new metadata for the remaining free slot.
+//     //
+//     // ... | metadata | object | metadata | free slot | ...
+//     //     ^          ^        ^
+//     //     metadata   ptr      new_metadata
+//     //                 <------><---------------------->
+//     //                   size       remaining size
+//     my_metadata_t *new_metadata = (my_metadata_t *)((char *)ptr + size);
+//     new_metadata->size = remaining_size - sizeof(my_metadata_t);
+//     new_metadata->next = NULL;
+//     // Add the remaining free slot to the free list.
+//     my_add_to_free_list(new_metadata);
+//   }
+//   return ptr;
+// }
+
+// heap4つに対応
 void *my_malloc(size_t size) {
-  my_metadata_t *metadata = my_heap.free_head;
+
+  int index = get_index(size);
+  my_metadata_t *metadata = NULL;
   my_metadata_t *prev = NULL;
-  // First-fit: Find the first free slot the object fits.
-  // TODO: Update this logic to Best-fit!
-  while (metadata && metadata->size < size) {
-    prev = metadata;
-    metadata = metadata->next;
+
+  //bestfit格納用の変数を用意
+  my_metadata_t *bestfit = NULL;
+  my_metadata_t *bestfit_prev = NULL;
+
+  for(int i = index;i < 4;i++){
+
+    // 見つからなかった時のために、index以上のリストを探索できるようにする
+    my_metadata_t *metadata = my_heap[i].free_head;
+    my_metadata_t *prev = NULL;
+
+    while(metadata){
+    // もし欲しいサイズよりも大きいサイズのものを見つけたら
+      if (metadata->size >= size){
+      // bestfitが存在しなければそれを格納、またはbestfitの現在格納されているサイズよりも小さいものを見つけたら更新
+        if(bestfit == NULL || (bestfit -> size) > (metadata -> size) ){
+          bestfit = metadata;
+          bestfit_prev = prev;
+        }
+      }
+      prev = metadata;
+      metadata = metadata->next;
+    }
+
+    // もしbestfitに該当するものが見つかったらroopを抜ける
+    if(bestfit != NULL){
+      break;
+    }
   }
+  
   // now, metadata points to the first free slot
   // and prev is the previous entry.
 
-  if (!metadata) {
+  if (!bestfit) {
     // There was no free slot available. We need to request a new memory region
     // from the system by calling mmap_from_system().
     //
@@ -104,6 +266,10 @@ void *my_malloc(size_t size) {
     // Now, try my_malloc() again. This should succeed.
     return my_malloc(size);
   }
+
+  // 最終的にmetadataをbestfitで見つけたものに変更
+  metadata = bestfit;
+  prev = bestfit_prev;
 
   // |ptr| is the beginning of the allocated object.
   //
