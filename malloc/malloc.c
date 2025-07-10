@@ -6,6 +6,12 @@
 // Initial implementation is the same as the one implemented in simple_malloc.c.
 // For the detailed explanation, please refer to simple_malloc.c.
 
+// メモ
+// 前と後ろにmetadataをおいておけば左結合の実装をすることできる
+// 今はfreeをするときに右結合のみ実装している。その際次のアドレスを取得して、while分でlinkedlistに含まれているかを探索し、含まれていれば右結合をするということをしている
+// metadataの中にfreelist_flagのようなfreelistであるかを明記するフラグを格納しておいてその中身を確認するだけにすれば実行時間は短くなるはず
+// utilizationは小さくなってしまうかもしれない
+
 #include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -13,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include<math.h>
 
 //
 // Interfaces to get memory pages from OS
@@ -28,6 +35,8 @@ void munmap_to_system(void *ptr, size_t size);
 typedef struct my_metadata_t {
   size_t size;
   struct my_metadata_t *next;
+  // prevとusedかどうかのフラグをメタデータに格納しておいて、freeの時に次のアドレスのこの要素を参照することで、一つ前の要素と使われているかどうかの判断をするようにすると
+  // 実行時間がはやくなる
 } my_metadata_t;
 
 typedef struct my_heap_t {
@@ -46,18 +55,35 @@ my_heap_t my_heap[4];
 // サイズに応じてindexを返す関数
 int get_index(size_t size) {
 
-  // sizeを1000で割った数に対応させる
-  int index = size/1000;
+  // サイズの分布を確認
+  // printf("size = %zu\n", size);
 
-  // それ以上であれば3にする
-  if (index > 3){
-    index = 3;
+  // sizeのlogをとることで、indexが小さい範囲にはsizeの範囲が小さくなり、（8~15など）
+  // indexの大きい範囲にはsizeの範囲が大きく格納されるので今回受け取る引数の分布に適したlinked listを作成することができる
+  // メモリ配列を9個用意(sizeの範囲が8~4096なので)
+
+  int index = (int)(log2(size));
+      index -= 3;
+
+  // segmentation fault予防
+  if (index < 0) {
+    // indexが小さすぎたら0にする
+    index = 0;
   }
-  return index;
-  //  // それ以上であれば7にする
-  // if (index > 7){
+  if (index > 8){
+    // indexの範囲が8より大きくなったら8にする
+    index = 8;
+  }
+
+  // sizeを1000で割った数に対応させる
+  // int index = size/1000;
+
+  // // それ以上であれば3にする
+  // if (index > 3){
   //   index = 3;
   // }
+
+  return index;
  
 }
 
@@ -71,7 +97,7 @@ int get_index(size_t size) {
 //   my_heap.free_head = metadata;
 // }
 
-// 4つのheapに対応させる
+// 9つのheapに対応させる
 void my_add_to_free_list(my_metadata_t *metadata) {
   assert(!metadata->next);
   int index = get_index(metadata -> size);
@@ -88,7 +114,7 @@ void my_add_to_free_list(my_metadata_t *metadata) {
 //   metadata->next = NULL;
 // }
 
-// 4つのheapに対応させる
+// 9つのheapに対応させる
 void my_remove_from_free_list(my_metadata_t *metadata, my_metadata_t *prev) {
   
   int index = get_index(metadata -> size);
@@ -113,9 +139,9 @@ void my_remove_from_free_list(my_metadata_t *metadata, my_metadata_t *prev) {
 //   my_heap.dummy.next = NULL;
 // }
 
-// 4つのheap全て初期化する必要がある
+// 9つのheap全て初期化する必要がある
 void my_initialize() {
-  for (int i = 0; i < 4; ++i) {
+  for (int i = 0; i < 9; ++i) {
     my_heap[i].free_head = &my_heap[i].dummy;
     my_heap[i].dummy.size = 0;
     my_heap[i].dummy.next = NULL;
@@ -221,7 +247,7 @@ void my_initialize() {
 //   return ptr;
 // }
 
-// heap4つに対応
+// heap9つに対応
 void *my_malloc(size_t size) {
 
   int index = get_index(size);
@@ -232,7 +258,7 @@ void *my_malloc(size_t size) {
   my_metadata_t *bestfit = NULL;
   my_metadata_t *bestfit_prev = NULL;
 
-  for(int i = index;i < 4;i++){
+  for(int i = index;i < 9;i++){
 
     // 見つからなかった時のために、index以上のリストを探索できるようにする
     my_metadata_t *metadata = my_heap[i].free_head;
@@ -361,21 +387,30 @@ void my_free(void *ptr) {
   my_metadata_t *metadata = (my_metadata_t *)ptr - 1;
 
   // 次のアドレスを参照して、その中身がfreelistに存在していたら結合するという処理を加える
-  // TODO 
-  // 下のコードだとmetadataの型が(my_metadata_t)型なので、(char *)metadata + (sizeof(my_metadata_t) + metadata->size) * sizeof(my_metadata_t)
-  // と同じになってしまうらしい
-  // my_metadata_t *metadata_next = (my_metadata_t *) metadata + sizeof(my_matadata_t) + metadata -> size ;
-  // 正しいコードは以下の通りcastする必要がある
+  // metadataだけだと構造体自体のサイズを返してしまうので、castする必要がある
   my_metadata_t *metadata_next = (my_metadata_t *)((char *)metadata + sizeof(my_metadata_t) + metadata->size);
 
-  // 右隣のアドレスがfreelistに含まれているか探索する
-  // バッファを用意
+  // metadata_nextが4096の倍数であるかを確認しないと、今私が触っていい場所以外の部分を参照している可能性がある
+  // metadata_nextの宣言の時に*がついていたらそれはポインタなのでアドレスが入っている
+  // if metadata_next % 4096 == 0ならmetadata_nextがフリーであるかを探索するという内容を実装
+
+  // free_listであるかを探索する必要があるかを保存するフラグ
+  bool free_flag = false;
+
+  // もしmetadata_nextの中身が4096の倍数であれば、flagにtrueを入れてwhile分を回すようにする（free_listであるかの探索をする）
+  if ((uintptr_t)metadata_next % 4096 == 0){
+    free_flag = true;
+  }
+
+ 
+  // 一つ前の要素を格納するバッファを用意
   my_metadata_t *buf = NULL;
   // sizeからfreelistとして含まれている可能性のあるindexを取得
   int index = get_index(metadata_next->size);
   my_metadata_t *nowlist = my_heap[index].free_head;
 
-  while (nowlist){
+   // フラグがtrueなら右隣のアドレスがfreelistに含まれているか探索する
+  while ((nowlist) && (free_flag)){
 
     // もしmetadata_next（右隣）がfreelistに含まれていたら、
     if(nowlist == metadata_next){
@@ -390,7 +425,7 @@ void my_free(void *ptr) {
     // 一つ前の情報を現在探索中のアドレスに更新
     buf = nowlist;
     // 現在探索中のアドレスを次のアドレスに更新
-    // いずれNULLになるので絶対にwhikeは抜ける
+    // いずれNULLになるので絶対にwhileは抜ける
     nowlist = nowlist->next;
 
   }
